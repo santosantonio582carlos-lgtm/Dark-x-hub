@@ -1,4 +1,4 @@
-local redzlib = loadstring(game:HttpGet("https://pastebin.com/raw/XqZsnzRQ",true))()
+local redzlib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yuna-ux/Other-scripts/refs/heads/main/UI-Library.lua"))()
 
 local vu6 = game:GetService("Players")
 local vu7 = vu6.LocalPlayer
