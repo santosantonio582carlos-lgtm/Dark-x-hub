@@ -1,0 +1,443 @@
+local redzlib = loadstring(game:HttpGet("https://pastebin.com/raw/XqZsnzRQ",true))()
+
+local vu6 = game:GetService("Players")
+local vu7 = vu6.LocalPlayer
+local vu8 = game:GetService("ReplicatedStorage")
+local vu10 = game:GetService("RunService")
+local vuCam = workspace.CurrentCamera
+
+-- Tabelas de estado e controle dos Props
+local meusPropsCache = {}
+local PropMovementMode = "Nenhum"
+local ModoAvancadoAtivo = false
+local selecionarTodosProps = false
+local jogadorSelecionadoProp = nil
+local espionandoProps = false
+local PropsActive = false
+local WaveSpeed = 0.25
+local ColorSpread = 0.05
+
+-- Configurações padrão para cada movimento
+local ConfigsProps = {
+    Orbita = { Speed = 2, Distance = 10, Height = 2 },
+    Aura = { Speed = 2, Distance = 8, Height = 1 },
+    Tremor = { Speed = 2, Distance = 10, Height = 2 },
+    Caotico = { Speed = 2, Distance = 12, Height = 2 },
+    Estrela = { Speed = 2, Distance = 15, Height = 15 },
+    Alinhamento = { Speed = 2, Distance = 6, Height = 2 },
+    Furacao = { Speed = 2, Distance = 10, Height = 4 },
+    Portal = { Speed = 2, Distance = 10, Height = 4 },
+    Nenhum = { Speed = 0, Distance = 0, Height = 0 }
+}
+
+-- Verifica se algum modo que necessita do PropMaker está ativo
+local function AlgumModoPropAtivo()
+    return (PropMovementMode ~= "Nenhum") or ModoAvancadoAtivo or PropsActive
+end
+
+-- Gera a lista com todos os jogadores presentes no servidor
+local function ObterListaNomesProps()
+    local lista = {"Todos"}
+    for _, jogador in ipairs(vu6:GetPlayers()) do
+        if jogador ~= vu7 then
+            table.insert(lista, jogador.Name)
+        end
+    end
+    return lista
+end
+
+-- Busca e atualiza a lista de props que respondem aos comandos
+local function AtualizarCacheProps()
+    table.clear(meusPropsCache)
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj:FindFirstChild("SetCurrentCFrame") then
+            table.insert(meusPropsCache, obj)
+        end
+    end
+end
+
+-- Sistema de notificação integrado ao jogo
+local function SendNotification(titulo, texto, tempo)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = titulo or "Aviso",
+            Text = texto or "",
+            Duration = tempo or 3
+        })
+    end)
+end
+
+-- ====================================================================
+-- LOOPS DE SEGUNDO PLANO
+-- ====================================================================
+
+-- Loop PropMaker
+task.spawn(function()
+    local ferramentaNoInventario = false
+    while true do
+        if AlgumModoPropAtivo() then
+            local char = vu7.Character
+            local mochila = vu7:FindFirstChild("Backpack")
+            local fE = char and char:FindFirstChild("PropMaker")
+            local fM = mochila and mochila:FindFirstChild("PropMaker")
+            if not fE and not fM then
+                pcall(function()
+                    vu8:WaitForChild("RE"):WaitForChild("1Too1l"):InvokeServer("PickingTools", "PropMaker")
+                end)
+            end
+            ferramentaNoInventario = true
+        else
+            if ferramentaNoInventario then
+                pcall(function()
+                    local char = vu7.Character
+                    local mochila = vu7:FindFirstChild("Backpack")
+                    local fE = char and char:FindFirstChild("PropMaker")
+                    local fM = mochila and mochila:FindFirstChild("PropMaker")
+                    if fE then fE:Destroy() end
+                    if fM then fM:Destroy() end
+                end)
+                ferramentaNoInventario = false
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+
+-- Cache de Props
+task.spawn(function()
+    while true do
+        if AlgumModoPropAtivo() then
+            pcall(AtualizarCacheProps)
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Movimentação dos Props (Mecânica de Bring e Teleporte)
+task.spawn(function()
+    local angle, tempoGeral = 0, 0
+    vu10.Heartbeat:Connect(function(dt)
+        if (PropMovementMode == "Nenhum" and not ModoAvancadoAtivo) or #meusPropsCache == 0 then return end
+        
+        -- Monta a lista de alvos de acordo com a seleção do Dropdown
+        local lista = {}
+        if selecionarTodosProps then
+            for _, p in ipairs(vu6:GetPlayers()) do
+                if p ~= vu7 and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                    table.insert(lista, p)
+                end
+            end
+        else
+            if jogadorSelecionadoProp and jogadorSelecionadoProp.Character and jogadorSelecionadoProp.Character:FindFirstChild("HumanoidRootPart") then
+                table.insert(lista, jogadorSelecionadoProp)
+            end
+        end
+        
+        if #lista == 0 then return end
+
+        local cfg = ConfigsProps[PropMovementMode]
+        local speedVal = cfg and cfg.Speed or 2
+        angle = angle + (dt * speedVal)
+        tempoGeral = tempoGeral + dt * (speedVal * 2)
+        local total = #meusPropsCache
+        local shift = selecionarTodosProps and math.floor(tick() * 30) or 0
+
+        -- Posição do jogador local para efetuar o Bring
+        local myChar = vu7.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local myCF = myRoot and myRoot.CFrame or CFrame.new()
+
+        for i, prop in ipairs(meusPropsCache) do
+            local remote = prop:FindFirstChild("SetCurrentCFrame")
+            if remote then
+                local pDono = lista[((i - 1 + shift) % #lista) + 1]
+                if pDono and pDono.Character and pDono.Character:FindFirstChild("HumanoidRootPart") then
+                    local root = pDono.Character.HumanoidRootPart
+                    local rCF = root.CFrame
+                    local humAlvo = pDono.Character:FindFirstChildWhichIsA("Humanoid")
+
+                    if ModoAvancadoAtivo then
+                        -- Verifica se o jogador selecionado (ou qualquer um no modo Todos) sentou no Prop
+                        if humAlvo and (humAlvo.SeatPart or humAlvo.Sit) then
+                            -- Teleporta o Prop (e quem está sentado nele) direto para VOCÊ (Bring)
+                            task.spawn(function() 
+                                pcall(remote.InvokeServer, remote, myCF * CFrame.new(0, 0, -3)) 
+                            end)
+                        else
+                            -- Envia o prop até o jogador para forçá-lo a sentar
+                            task.spawn(function() 
+                                pcall(remote.InvokeServer, remote, rCF) 
+                            end)
+                        end
+                    elseif cfg then
+                        -- Outros modos de movimentação (Órbita, Aura, etc.)
+                        local tPos = rCF.Position
+                        local olharPara = rCF.Position
+                        local spacing = (math.pi * 2) / math.max(total, 1)
+                        local fAngle = angle + (i * spacing) + (shift * 0.5)
+
+                        if PropMovementMode == "Orbita" then
+                            tPos = rCF.Position + Vector3.new(math.cos(fAngle) * cfg.Distance, cfg.Height, math.sin(fAngle) * cfg.Distance)
+                        elseif PropMovementMode == "Aura" then
+                            local o = math.sin(tempoGeral * 3 + i) * 1.5
+                            tPos = rCF.Position + Vector3.new(math.cos(fAngle * 1.5) * (cfg.Distance + (o * 0.2)), cfg.Height + o, math.sin(fAngle * 1.5) * (cfg.Distance + (o * 0.2)))
+                            olharPara = rCF.Position + Vector3.new(0, o, 0)
+                        elseif PropMovementMode == "Tremor" then
+                            tPos = rCF.Position + Vector3.new(math.cos(fAngle) * cfg.Distance, cfg.Height, math.sin(fAngle) * cfg.Distance) + Vector3.new(math.sin(tick() * 50 + i) * 0.8, math.cos(tick() * 55 + i) * 0.8, math.sin(tick() * 60 + i) * 0.8)
+                        elseif PropMovementMode == "Caotico" then
+                            tPos = rCF.Position + Vector3.new(math.cos(fAngle) * cfg.Distance, cfg.Height, math.sin(fAngle) * cfg.Distance) + Vector3.new(math.sin(tempoGeral + (i * 2)) * (cfg.Distance * 0.5), math.cos(tempoGeral * 1.8 + i) * 4, math.sin(tempoGeral * 1.3 + i) * (cfg.Distance * 0.5))
+                            olharPara = tPos + Vector3.new(math.sin(tempoGeral * 5), math.cos(tempoGeral * 5), math.sin(tempoGeral * 3))
+                        elseif PropMovementMode == "Estrela" then
+                            local e = cfg.Distance + (math.sin(tempoGeral * 2.5 + i) * (cfg.Distance * 0.4))
+                            tPos = rCF.Position + Vector3.new(math.cos(fAngle) * e, cfg.Height + (math.cos(fAngle) * 2), math.sin(fAngle) * e)
+                            olharPara = rCF.Position + Vector3.new(0, cfg.Height, 0)
+                        elseif PropMovementMode == "Alinhamento" then
+                            tPos = rCF.Position + (rCF.LookVector * (-5 - (i * cfg.Distance))) + Vector3.new(0, cfg.Height + (math.sin(tempoGeral + i) * 0.5), 0)
+                            olharPara = tPos - (rCF.LookVector * 100)
+                        elseif PropMovementMode == "Furacao" then
+                            local s = ((tempoGeral + (i * 2)) % 10) - 3
+                            local pFrente = rCF.Position + (rCF.LookVector * 5)
+                            tPos = pFrente + Vector3.new(math.cos(fAngle * 1.5) * (cfg.Distance * (1 - (s / 15))), cfg.Height + s, math.sin(fAngle * 1.5) * (cfg.Distance * (1 - (s / 15))))
+                            olharPara = pFrente + Vector3.new(0, 10, 0)
+                        elseif PropMovementMode == "Portal" then
+                            local rp = cfg.Distance * 0.7
+                            local pFrente = rCF.Position + (rCF.LookVector * 5)
+                            tPos = (rCF * CFrame.new(0, cfg.Height + (math.sin(fAngle) * rp), -5)).Position + (rCF.RightVector * (math.cos(fAngle) * rp))
+                            olharPara = pFrente + (rCF.LookVector * 20)
+                        end
+                        task.spawn(function() pcall(remote.InvokeServer, remote, CFrame.lookAt(tPos, olharPara)) end)
+                    end
+                end
+            end
+        end
+    end)
+end)
+
+-- Loop RGB dos Props
+task.spawn(function()
+    while true do
+        if PropsActive and #meusPropsCache > 0 then
+            local tempoAtual = tick()
+            local propColorRemote = vu7:FindFirstChild("PlayerGui")
+                and vu7.PlayerGui:FindFirstChild("NoResetGUIHandler")
+                and vu7.PlayerGui.NoResetGUIHandler:FindFirstChild("PropColorPicker")
+                and vu7.PlayerGui.NoResetGUIHandler.PropColorPicker:FindFirstChild("SetColor")
+
+            for i, prop in ipairs(meusPropsCache) do
+                local remote = prop:FindFirstChild("ChangePropColor")
+                if remote then
+                    local bp = prop:FindFirstChildWhichIsA("BasePart")
+                    local color = Color3.fromHSV(((tempoAtual * WaveSpeed) + ((bp and bp.Position.X or i) * ColorSpread)) % 1, 1, 1)
+                    for _, part in ipairs(prop:GetDescendants()) do
+                        if part:IsA("BasePart") then part.Color = color end
+                    end
+                    task.spawn(function() pcall(remote.InvokeServer, remote, color) end)
+                end
+            end
+            
+            if propColorRemote then
+                pcall(function()
+                    propColorRemote:FireServer(Color3.fromHSV((tempoAtual * WaveSpeed) % 1, 1, 1))
+                end)
+            end
+        end
+        task.wait(0.05)
+    end
+end)
+-- ====================================================================
+-- 3. INTERFACE DE USUÁRIO (REDZLIB V5)
+-- ====================================================================
+local Window = redzlib:MakeWindow({
+    Title = "Dark x Hub [Carlolx777",
+    SubTitle = "Brookhaven RP | by Carlolx777",
+    SaveFolder = "UnifiedHubConfig"
+})
+
+Window:AddMinimizeButton({
+    Button = { Image = "rbxassetid://113088956809836", BackgroundTransparency = 0 },
+    Corner = { CornerRadius = UDim.new(35, 1) },
+})
+
+local PropsTab = Window:MakeTab({"Troll", "rbxassetid://13364900349"})
+
+-- ====================================================================
+-- ABA: PROPS
+-- ====================================================================
+PropsTab:AddSection({"Lista de Jogadores"})
+
+local DropdownJogadoresProps = PropsTab:AddDropdown({
+    Name = "Selecionar Jogador",
+    Options = ObterListaNomesProps(),
+    Default = "...",
+    Callback = function(opcao)
+        local nomeSelecionado = type(opcao) == "table" and opcao[1] or opcao
+        if nomeSelecionado and nomeSelecionado ~= "..." then
+            if nomeSelecionado == "Todos" then
+                selecionarTodosProps = true
+                jogadorSelecionadoProp = nil
+            else
+                selecionarTodosProps = false
+                jogadorSelecionadoProp = vu6:FindFirstChild(nomeSelecionado)
+            end
+            if espionandoProps and jogadorSelecionadoProp and jogadorSelecionadoProp.Character then  
+                local hum = jogadorSelecionadoProp.Character:FindFirstChildWhichIsA("Humanoid")
+                if hum then vuCam.CameraSubject = hum end  
+            end  
+        else
+            jogadorSelecionadoProp = nil
+            selecionarTodosProps = false
+        end  
+    end
+})
+
+PropsTab:AddButton({
+    Name = "Atualizar Lista de Jogadores",
+    Callback = function()
+        DropdownJogadoresProps:Set(ObterListaNomesProps())
+        SendNotification("Lista", "Lista de jogadores atualizada!", 2)
+    end
+})
+
+PropsTab:AddToggle({
+    Name = "Ver/Espionar Jogador",
+    Default = false,
+    Callback = function(state)
+        espionandoProps = state
+        if state then
+            task.spawn(function()
+                while espionandoProps do
+                    pcall(function()
+                        if jogadorSelecionadoProp and jogadorSelecionadoProp.Character then
+                            local hum = jogadorSelecionadoProp.Character:FindFirstChildWhichIsA("Humanoid")
+                            if hum and vuCam.CameraSubject ~= hum then
+                                vuCam.CameraSubject = hum
+                            end
+                        end
+                    end)
+                    task.wait(0.2)
+                end
+                if vu7.Character and vu7.Character:FindFirstChild("Humanoid") then
+                    vuCam.CameraSubject = vu7.Character.Humanoid
+                end
+            end)
+        else
+            if vu7.Character and vu7.Character:FindFirstChild("Humanoid") then
+                vuCam.CameraSubject = vu7.Character.Humanoid
+            end
+        end
+    end
+})
+
+PropsTab:AddSection({"Modo OP"})
+
+PropsTab:AddToggle({
+    Name = "Bring / Teleportar Jogador (Assento)", 
+    Default = false,
+    Callback = function(state)
+        ModoAvancadoAtivo = state
+        if not state then return end
+        task.spawn(function()
+            local alguemSentou = false
+            while ModoAvancadoAtivo and not alguemSentou do
+                local alvos = {}
+                if selecionarTodosProps then
+                    for _, p in ipairs(vu6:GetPlayers()) do
+                        if p ~= vu7 and p.Character then table.insert(alvos, p) end
+                    end
+                elseif jogadorSelecionadoProp and jogadorSelecionadoProp.Character then
+                    table.insert(alvos, jogadorSelecionadoProp)
+                end
+                for _, alvo in ipairs(alvos) do
+                    local hum = alvo.Character:FindFirstChildWhichIsA("Humanoid")
+                    if hum and (hum.SeatPart or hum.Sit) then
+                        alguemSentou = true
+                        break
+                    end
+                end
+                task.wait(0.1)
+            end
+            if alguemSentou and ModoAvancadoAtivo then
+                pcall(function()
+                    vu8:WaitForChild("RE"):WaitForChild("1Too1l"):InvokeServer("PickingTools", "PropMaker")
+                end)
+            end
+        end)
+    end
+})
+
+PropsTab:AddSection({"Controle RGB"})
+
+PropsTab:AddToggle({
+    Name = "Props RGB",
+    Default = false,
+    Callback = function(state)
+        PropsActive = state
+        if state then AtualizarCacheProps() end
+    end
+})
+
+PropsTab:AddSlider({
+    Name = "Velocidade da Onda",
+    MinValue = 1,
+    MaxValue = 100,
+    Increase = 1,
+    Default = 50,
+    Callback = function(v) WaveSpeed = v / 200 end
+})
+
+PropsTab:AddSlider({
+    Name = "Frequência do Gradiente",
+    MinValue = 1,
+    MaxValue = 100,
+    Increase = 1,
+    Default = 25,
+    Callback = function(v) ColorSpread = v / 500 end
+})
+
+-- ====================================================================
+-- ABA: MODOS DE MOVIMENTO DE PROPS
+-- ====================================================================
+local function CriarSecaoModo(nomeModo, chaveConfig, altMin, altMax, altPadrao)
+    ConfigTab:AddSection({"Opção: Props " .. nomeModo})
+    ConfigTab:AddToggle({
+        Name = "Ativar " .. nomeModo,
+        Default = false,
+        Callback = function(s)
+            PropMovementMode = s and chaveConfig or "Nenhum"
+            if s then AtualizarCacheProps() end
+        end
+    })
+    ConfigTab:AddSlider({
+        Name = "Velocidade (" .. nomeModo .. ")",
+        MinValue = 1,
+        MaxValue = 100,
+        Increase = 1,
+        Default = math.floor(ConfigsProps[chaveConfig].Speed * 20),
+        Callback = function(v) ConfigsProps[chaveConfig].Speed = v / 20 end
+    })
+    ConfigTab:AddSlider({
+        Name = "Distância (" .. nomeModo .. ")",
+        MinValue = 1,
+        MaxValue = 50,
+        Increase = 1,
+        Default = ConfigsProps[chaveConfig].Distance,
+        Callback = function(v) ConfigsProps[chaveConfig].Distance = v end
+    })
+    ConfigTab:AddSlider({
+        Name = "Altura (" .. nomeModo .. ")",
+        MinValue = altMin or -10,
+        MaxValue = altMax or 30,
+        Increase = 1,
+        Default = altPadrao or ConfigsProps[chaveConfig].Height,
+        Callback = function(v) ConfigsProps[chaveConfig].Height = v end
+    })
+end
+
+CriarSecaoModo("Órbita", "Orbita", -10, 30, 2)
+CriarSecaoModo("Aura", "Aura", -10, 30, 1)
+CriarSecaoModo("Tremor", "Tremor", -10, 30, 2)
+CriarSecaoModo("Caótico", "Caotico", -10, 30, 2)
+CriarSecaoModo("Estrela", "Estrela", 1, 100, 15)
+CriarSecaoModo("Alinhamento", "Alinhamento", -10, 30, 2)
+CriarSecaoModo("Furacão", "Furacao", -10, 30, 4)
+CriarSecaoModo("Portal", "Portal", -10, 30, 4)
